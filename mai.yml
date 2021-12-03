@@ -1,0 +1,33 @@
+---
+- name: Gather inputs
+  hosts: all
+  become: yes
+# connection: ssh
+  become_method: sudo
+  gather_facts: no
+  vars_files:
+    - /root/user_creation/playbook/secrets
+  pre_tasks:
+  - wait_for_connection:
+      timeout: 10
+    register: ssh_conn
+    ignore_errors: yes
+    ignore_unreachable: yes
+
+  - name: Example from an Ansible Playbook
+    ping:
+
+  - debug:
+      var: ssh_conn
+    when: ssh_conn is success
+
+  - setup:
+      gather_subset: '!all'
+    register: facts
+    ignore_errors: yes
+    ignore_unreachable: yes
+    when: ssh_conn is success
+
+  tasks:
+   - include_role:
+        name: create_linux_user
