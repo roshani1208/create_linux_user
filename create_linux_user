@@ -1,0 +1,118 @@
+---
+ - name: check details
+   set_fact: os_release= "{{ facts.ansible_facts.ansible_distribution }} {{ facts.ansible_facts.ansible_distribution_major_version }}"
+   when:
+     - ssh_conn is success
+   delegate_to: localhost
+   become: false
+   register: osrelease
+   ignore_errors: yes
+   ignore_unreachable: yes
+
+ - name: group creation for RHEL/Amazon2018/SUSE
+   group:
+     name: "{{ defined_group_name }}"
+     gid: "{{ group_uid | int }}"
+   ignore_errors: yes
+   ignore_unreachable: yes
+   when:
+     - ssh_conn is success
+
+ - name: Create local users for RHEL7/Amazon2018/SUSE
+   user:
+     name: "{{ user_name }}"
+     comment: "{{ full_user_name }}"
+     groups: "{{ defined_group_name | default(omit) }}"  ## can be comma separated for multiple groups
+     shell: /bin/bash
+     append: yes
+   ignore_errors: yes
+   ignore_unreachable: yes
+   register: user_output
+   when:
+     - ssh_conn is success
+
+ - debug: var=user_output
+
+ - set_fact:
+     usecase_status: "Failed"
+     usecase_log: "Failed to create one or more users"
+   when:
+     - ssh_conn is success
+     - user_output.failed is defined
+     - user_output.failed == true
+
+ - set_fact:
+     usecase_status: "Success"
+     usecase_log: "User created successfully"
+   when:
+    - ssh_conn is success
+    - user_output.failed is defined
+    - user_output.failed == false
+
+ - set_fact:
+     usecase_status: "Failed"
+     usecase_log: "SSH Connectivity failed to the target server"
+   when:
+    - ssh_conn is failed
+
+## Create .ssh directory if does not exist
+ - name: Create a ssh dir
+   file:
+     path: "{{ user_output.home }}/.ssh"
+     state: directory
+     mode: '0700'
+   register: create_ssh
+   ignore_errors: yes
+   ignore_unreachable: yes
+   when:
+     - ssh_conn is success
+     - user_output.failed is defined
+     - user_output.failed == false
+
+ - debug: var=create_ssh
+
+ - name: Create authorized keys file if does not exist
+   file:
+     path: "{{ user_output.home }}/.ssh/authorized_keys"
+     state: touch
+     mode: '0600'
+   register: create_auth_file
+   ignore_errors: yes
+   ignore_unreachable: yes
+   when:
+     - ssh_conn is success
+     - user_output.failed is defined
+     - user_output.failed == false
+
+ - debug: var=create_auth_file
+
+ ## Copy the public key in the user's home directory
+ - name: SYSTEM - Set authorized key for test_user took from file
+   authorized_key:
+     user: "{{ user_name }}"
+     state: present
+     key: "{{ lookup('file', item) }}"
+   with_fileglob:
+     - /root/user_creation/keys/id_rsa.pub
+   register: copy_ssh_keys
+   ignore_errors: yes
+   ignore_unreachable: yes
+
+ - debug: var=copy_ssh_keys
+
+ - name: enable PAM auth if disabled
+   lineinfile:
+     path: /etc/ssh/sshd_config
+     regexp: "^(.*)UsePAM no(.*)$"
+     line: "UsePAM yes"
+     backrefs: yes
+   register: enable_pam_auth
+   become: true
+   ignore_errors: yes
+   ignore_unreachable: yes
+   when:
+     - ssh_conn is success
+     - user_output.failed is defined
+     - user_output.failed == false
+
+ - debug: var=enable_pam_auth
